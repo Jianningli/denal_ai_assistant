@@ -166,6 +166,7 @@ Interactive spreadsheet analysis with AI-powered insights and automatic charting
 
 **AI Model:** `llama3:8b`  
 **Embeddings:** `sentence-transformers/all-MiniLM-L6-v2`
+
 ![Login Screen](assests/rag.png)
 ---
 
@@ -458,11 +459,6 @@ pip install --upgrade sentence-transformers faiss-cpu
 - ✅ **File-Based Storage**: Portable, user-controllable data
 - ⚠️ **Warning**: RAG document content is held in memory (RAM)
 
----
-
-## 📝 License
-
-[Your License Here - e.g., MIT, Apache 2.0, or Proprietary]
 
 ---
 
@@ -485,4 +481,4 @@ For issues, feature requests, or contributions:
 
 ---
 
-*Built with ❤️ for dental professionals. Your data, your control.*
+*Built with ❤️. Your data, your control.*
