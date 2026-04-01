@@ -1,13 +1,12 @@
 # 🦷 Dental AI Assistant
 
-A comprehensive, private, desktop AI application for dental professionals. Built with **PyQt6** and powered by local **Ollama** LLMs, your data never leaves your machine.
+A comprehensive, private, desktop AI application for dental professionals. Built with **PyQt6** and powered by local **Ollama** LLMs, your data never leaves your machine (for research and information purpose only).
 
 ---
 
 ## 📋 Table of Contents
 
 - [Features](#features)
-- [Screenshots](#screenshots)
 - [Installation](#installation)
 - [Usage Guide](#usage-guide)
 - [Architecture](#architecture)
