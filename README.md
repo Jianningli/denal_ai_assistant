@@ -6,14 +6,39 @@ A comprehensive, private, desktop AI application for dental professionals. Built
 
 ## 📋 Table of Contents
 
-- [Features](#features)
-- [Installation](#installation)
-- [Usage Guide](#usage-guide)
-- [Architecture](#architecture)
-- [Data Persistence](#data-persistence)
-- [Keyboard Shortcuts](#keyboard-shortcuts)
-- [System Requirements](#system-requirements)
-- [Troubleshooting](#troubleshooting)
+- [Features](#-features)
+  - [User Isolation & Login](#-user-isolation--login)
+  - [Chat (Tool 0)](#-chat-tool-0)
+  - [PDF Summary (Tool 1)](#-pdf-summary-tool-1)
+  - [Website Summary (Tool 2)](#-website-summary-tool-2)
+  - [Excel Analysis (Tool 3)](#-excel-analysis-tool-3)
+  - [Ask Your Document / RAG (Tool 4)](#-ask-your-document--rag-tool-4)
+  - [Global Search (Ctrl+F)](#-global-search-ctrlf)
+- [Installation](#-installation)
+  - [Prerequisites](#prerequisites)
+  - [Python Dependencies](#python-dependencies)
+  - [Running the Application](#running-the-application)
+- [Usage Guide](#-usage-guide)
+  - [First Launch](#first-launch)
+  - [Using Chat](#using-chat)
+  - [Analyzing Excel Files](#analyzing-excel-files)
+  - [Using RAG](#using-rag)
+  - [Searching History](#searching-history)
+  - [Exporting Conversations](#exporting-conversations)
+- [Architecture](#-architecture)
+  - [Class Hierarchy](#class-hierarchy)
+  - [Worker Threads](#worker-threads)
+- [Data Persistence](#-data-persistence)
+  - [Session Management](#session-management)
+  - [Storage Location](#storage-location)
+  - [JSON Schema](#json-schema)
+- [Keyboard Shortcuts](#-keyboard-shortcuts)
+- [System Requirements](#-system-requirements)
+  - [Model Requirements](#model-requirements)
+- [Troubleshooting](#-troubleshooting)
+- [Privacy & Security](#-privacy--security)
+- [Acknowledgments](#-acknowledgments)
+- [Contact & Support](#-contact--support)
 
 ---
 
@@ -69,6 +94,7 @@ Fetch and summarize any public web page instantly.
 - One-click fetch and analyze
 
 **AI Model:** `llama3:8b`
+
 ![Login Screen](assests/url_sum.png)
 ---
 
