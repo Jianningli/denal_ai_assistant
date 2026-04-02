@@ -10,9 +10,9 @@ A comprehensive, private, desktop AI application for dental professionals. Built
 - [Installation](#installation)
 - [Usage Guide](#usage-guide)
 - [Architecture](#architecture)
-- [Data Storage](#data-storage)
+- [Data Persistence](#data-persistence)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
-- [Requirements](#requirements)
+- [System Requirements](#system-requirements)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -22,7 +22,7 @@ A comprehensive, private, desktop AI application for dental professionals. Built
 ### 🔐 User Isolation & Login
 - **Private login system**: Each user has isolated data
 - **Per-user storage**: Chat history, Excel sessions, and RAG index are completely separate per user
-- **Local-first**: All data saved to local JSON files—no cloud dependency
+- **Local-first**: All data saved to local JSON files with no cloud dependency
 
 ![Login Screen](assests/login.png)
 
@@ -30,7 +30,7 @@ A comprehensive, private, desktop AI application for dental professionals. Built
 Your general-purpose dental AI assistant.
 
 **Key Features:**
-- Full conversational chat interface with scrollable message bubbles
+- **Conversations**: Full conversational chat interface with scrollable message bubbles
 - **Streaming responses**: Tokens appear in real-time
 - **Multiple sessions**: Create, rename, and delete chat sessions
 - **Persistent history**: All conversations autosaved
@@ -48,7 +48,7 @@ Extract and summarize dental reports, research papers, or any PDF document.
 **Key Features:**
 - Upload any PDF file via file browser
 - Select summary length: **Short** (1-2 paragraphs) | **Medium** | **Detailed**
-- **Focus mode**: Optionally specify topics to emphasize (e.g., "Periodontitis procedures")
+- Focus mode: Optionally specify topics to emphasize (e.g., "Periodontitis procedures")
 - Displays extracted character count
 - Clean, formatted output
 
@@ -268,7 +268,7 @@ history/
 
 3. **Required Models**
    ```bash
-   # Pull the dental model
+   # Pull a general model
    ollama pull llama3:8b
    
    # Or create a custom model based on llama3:8b using system prompt
@@ -309,7 +309,7 @@ numpy>=1.24.0
 ### Running the Application
 
 ```bash
-python dental_ai_chatbot_gui_v4.py
+python dental_ai_chatbot.py
 ```
 
 ---
@@ -462,7 +462,7 @@ pip install --upgrade sentence-transformers faiss-cpu
 
 ---
 
-## 🙏 Acknowledgments
+## 🙏 Useful Tools
 
 - **Ollama** - Local LLM runtime
 - **PyQt6** - Desktop GUI framework
@@ -476,7 +476,7 @@ pip install --upgrade sentence-transformers faiss-cpu
 ## 📧 Contact & Support
 
 For issues, feature requests, or contributions:
-- GitHub Issues: https://github.com/Jianningli/denal_ai_assistant
+- GitHub Issues: https://github.com/Jianningli/denal_ai_assistant/issues
 - Email: jianningli.me@gmail.com
 
 ---
