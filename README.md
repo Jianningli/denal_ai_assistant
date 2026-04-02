@@ -37,7 +37,7 @@ A comprehensive, private, desktop AI application for dental professionals. Built
   - [Model Requirements](#model-requirements)
 - [Troubleshooting](#-troubleshooting)
 - [Privacy & Security](#-privacy--security)
-- [Useful Tools](#-acknowledgments)
+- [Useful Tools](#-useful-tools)
 - [Contact & Support](#-contact--support)
 
 ---
