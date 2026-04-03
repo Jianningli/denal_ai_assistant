@@ -298,7 +298,7 @@ history/
    ollama pull llama3:8b
    
    # Or create a custom model based on llama3:8b using system prompt
-   ollama create pull personaldentalassistantadvanced_xml -f personaldentalassistant.modelfile
+   ollama create personaldentalassistantadvanced_xml -f personaldentalassistant.modelfile
    ```
 
 ### Python Dependencies
