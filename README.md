@@ -13,6 +13,7 @@ A comprehensive, private, desktop AI application for dental professionals. Built
   - [Website Summary (Tool 2)](#-website-summary-tool-2)
   - [Excel Analysis (Tool 3)](#-excel-analysis-tool-3)
   - [Ask Your Document / RAG (Tool 4)](#-ask-your-document--rag-tool-4)
+  - [Dental Image Analysis)](#-dental-image-analysis)
   - [Global Search (Ctrl+F)](#-global-search-ctrlf)
 - [Installation](#-installation)
   - [Prerequisites](#prerequisites)
@@ -194,6 +195,20 @@ Interactive spreadsheet analysis with AI-powered insights and automatic charting
 **Embeddings:** `sentence-transformers/all-MiniLM-L6-v2`
 
 ![Login Screen](assests/rag.png)
+
+
+---
+
+### 🦷 Dental Image Analysis
+
+
+**AI Model:** `gemma4:e4b`  
+
+![Login Screen](assests/image_1.png)
+
+![Login Screen](assests/image_1.png)
+
+
 ---
 
 ## 🔍 Global Search (Ctrl+F)
@@ -298,7 +313,7 @@ history/
    ollama pull llama3:8b
    
    # Or create a custom model based on llama3:8b using system prompt
-   ollama create pull personaldentalassistantadvanced_xml -f personaldentalassistant.modelfile
+   ollama create personaldentalassistantadvanced_xml -f personaldentalassistant.modelfile
    ```
 
 ### Python Dependencies

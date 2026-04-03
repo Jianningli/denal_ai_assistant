@@ -1,0 +1,37 @@
+{
+  "username": "Dr.Smith",
+  "kind": "chat",
+  "sessions": {
+    "57c67868": {
+      "title": "Chat 1",
+      "created": "2026-04-02T10:17:43",
+      "messages": []
+    },
+    "29997555": {
+      "title": "Chat 2",
+      "created": "2026-04-02T10:17:49",
+      "messages": [
+        {
+          "role": "user",
+          "content": "Who are you?",
+          "ts": "2026-04-02T10:18:10"
+        },
+        {
+          "role": "assistant",
+          "content": "I am Dente-Pro, a clinical triage intelligence. My primary function is to categorize patient urgency without diagnosing. I'm here to help healthcare professionals and patients make informed decisions about who needs immediate attention and who can wait for further evaluation.",
+          "ts": "2026-04-02T10:18:43"
+        },
+        {
+          "role": "user",
+          "content": "Bleeding gums when brushing",
+          "ts": "2026-04-02T10:19:16"
+        },
+        {
+          "role": "assistant",
+          "content": "## 🦷 Assessment\nYou are experiencing bleeding gums while brushing your teeth.\n\n## 🔍 Questions\n1. Is the bleeding localized to one area or is it widespread?\n2. Have you recently experienced any trauma or injury to your mouth?\n\n## ⚠️ Urgency Level\nUrgent - This could be a sign of an underlying issue, such as gum disease or periodontitis, which needs attention from a dental professional.\n\n**Medical Disclaimer:** This assessment is not intended to replace a proper examination by a qualified healthcare professional. Always consult with your dentist or healthcare provider for personalized advice and treatment.",
+          "ts": "2026-04-02T10:19:41"
+        }
+      ]
+    }
+  }
+}

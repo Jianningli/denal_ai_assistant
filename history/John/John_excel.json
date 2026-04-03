@@ -1,0 +1,32 @@
+{
+  "username": "John",
+  "kind": "excel",
+  "sessions": {
+    "42243a6b": {
+      "title": "Excel 1",
+      "created": "2026-04-03T17:52:51",
+      "messages": [
+        {
+          "role": "user",
+          "content": "what is the most costly treatment",
+          "ts": "2026-04-03T18:09:30"
+        },
+        {
+          "role": "assistant",
+          "content": "To answer this question, I'll draw from Sheet: Treatments.\n\nAfter reviewing the data, I found that the most costly treatment is:\n\n**T1004**: Crown (544.50)\n\nThis information can be found in the TreatmentType and Cost columns of the Treatments sheet.",
+          "ts": "2026-04-03T18:10:16"
+        },
+        {
+          "role": "user",
+          "content": "total cost of treatments",
+          "ts": "2026-04-03T18:13:15"
+        },
+        {
+          "role": "assistant",
+          "content": "I can help with that!\n\nTo find the total cost of treatments, I'll draw from the \"Treatments\" sheet. Let's add up the Cost column:\n\n* T1001: 102.85\n* T1002: 48.40\n* T1003: 145.20\n* T1004: 544.50\n\nTotal cost of treatments: 740.95",
+          "ts": "2026-04-03T18:14:59"
+        }
+      ]
+    }
+  }
+}
