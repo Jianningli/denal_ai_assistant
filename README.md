@@ -62,10 +62,13 @@ Your general-purpose dental AI assistant.
 - **Persistent history**: All conversations autosaved
 - **Session sidebar**: Quick navigation between different conversation threads
 - **Export to PDF**: Save any chat session as a formatted PDF document
+-  **Multilingual support**: Chat in multiple languages
 
 **AI Model:** `personaldentalassistantadvanced_xml` (dental-specialized)
 
 ![Login Screen](assests/chat.png)
+![Login Screen](assests/chat_1.png)
+
 ---
 
 ### 📄 PDF Summary (Tool 1)
@@ -206,7 +209,7 @@ Interactive spreadsheet analysis with AI-powered insights and automatic charting
 
 ![Login Screen](assests/image_1.png)
 
-![Login Screen](assests/image_1.png)
+![Login Screen](assests/image_2.png)
 
 
 ---
