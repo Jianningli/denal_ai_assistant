@@ -1,4 +1,4 @@
-# 🦷 Dental AI Assistant
+# 🦷 Multimodal (text, image) Dental AI Assistant
 
 A comprehensive, private, desktop AI application for dental professionals. Built with **PyQt6** and powered by local **Ollama** LLMs, your data never leaves your machine (for research and information purpose only).
 
@@ -84,7 +84,7 @@ Extract and summarize dental reports, research papers, or any PDF document.
 
 **AI Model:** `llama3:8b` (general purpose)
 
-![Login Screen](assests/pdf_sum.png)
+![Login Screen](assests/pdf_summary.png)
 
 ---
 
@@ -100,7 +100,7 @@ Fetch and summarize any public web page instantly.
 
 **AI Model:** `llama3:8b`
 
-![Login Screen](assests/url_sum.png)
+![Login Screen](assests/url_summary.png)
 ---
 
 ### 📊 Excel Analysis (Tool 3)

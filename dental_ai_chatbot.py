@@ -1,23 +1,7 @@
 """
-Dental AI Assistant — PyQt6 Desktop Application  v3
 =====================================================
-New in this version
--------------------
-1. Excel Analysis & Ask Your Document both use a full chat-style interface:
-     - Scrollable message bubbles accumulate Q&A without clearing
-     - Each tool has its own session sidebar (New / Rename / Delete)
-     - Export current session → PDF button in every panel
-
-2. Separate per-user JSON history files:
-     - {username}_chat.json    — regular chat sessions
-     - {username}_excel.json   — Excel Q&A sessions
-     - {username}_rag.json     — RAG / Ask Your Document sessions
-
-3. User isolation: every HistoryStore is scoped to the logged-in user,
-   so Dr. Smith never sees Dr. Jones's conversations.
-
-4. Global Search (Ctrl+F) searches across all three stores for the
-   current user.
+Dental AI Assistant — PyQt6 Desktop Application [Copyright (c) 2026 Jianning Li]
+=====================================================
 """
 
 # ── stdlib ────────────────────────────────────────────────────────────────────

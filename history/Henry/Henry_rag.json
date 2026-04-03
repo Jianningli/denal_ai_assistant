@@ -1,0 +1,11 @@
+{
+  "username": "Henry",
+  "kind": "rag",
+  "sessions": {
+    "9fb89a81": {
+      "title": "RAG 1",
+      "created": "2026-04-03T19:31:26",
+      "messages": []
+    }
+  }
+}
