@@ -1,4 +1,4 @@
-# Dental AI Assistant
+# Multimodal (text, image) Dental AI Assistant
 
 A local-first PyQt6 desktop assistant for dental workflows. The app runs against local Ollama models for chat, document Q&A, summaries, spreadsheet analysis, and dental image analysis. User history is stored per account under `history/`, with encrypted `.enc` files when `cryptography` is available.
 
@@ -48,6 +48,7 @@ This project is intended for educational and informational use only. It is not a
 - Context window monitoring in the status bar.
 - Automatic conversation compression when the history gets too large.
 - PDF export for the active chat session.
+- Multilingual support
 
 ![Chat](assests/chat.png)
 ![Chat Variant](assests/chat_1.png)
