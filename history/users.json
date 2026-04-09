@@ -1,0 +1,14 @@
+{
+  "m\u00fcller": {
+    "display_name": "M\u00fcller",
+    "auth_salt": "95263ba2c0f928b34adc7d66deead9b2b47681d8fa45ba331b705b87c6bb9002",
+    "auth_hash": "ccf8008de08f3832a3305d188a7b3c3526e194a5669ddf9f4b765c87c1867e42",
+    "enc_salt": "5cbede6121c271617ae2384d2c3eb942a71c8fc994d2cd0281642618cfaad004"
+  },
+  "steve": {
+    "display_name": "Steve",
+    "auth_salt": "25a86c09ec589876b3c91ae938e4f3ff19b909ed11c1b92d1c64b955b6ea5134",
+    "auth_hash": "b369b3b229d66df746f56a2ca45f96f6894ae62b121c1d747569e082fd56f89e",
+    "enc_salt": "7c77509227728089249e59f86d964936a5716386bdbb2f1a6405c828598b9c38"
+  }
+}

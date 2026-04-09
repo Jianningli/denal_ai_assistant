@@ -1,14 +1,16 @@
 """
-=====================================================
-Dental AI Assistant — PyQt6 Desktop Application [Copyright (c) 2026 Jianning Li]
+Dental AI Assistant — PyQt6 Desktop Application
 =====================================================
 """
 
 # ── stdlib ────────────────────────────────────────────────────────────────────
 import base64
+import hashlib
 import io
 import json
+import os
 import re
+import secrets
 import sys
 import uuid
 from datetime import datetime, date
@@ -16,6 +18,22 @@ from pathlib import Path
 from typing import Optional
 
 # ── third-party ───────────────────────────────────────────────────────────────
+# pip install bcrypt cryptography
+# bcrypt  — password hashing for the credential store
+# cryptography — Fernet AES-128 symmetric encryption for history files
+try:
+    import bcrypt
+    BCRYPT_AVAILABLE = True
+except ImportError:
+    BCRYPT_AVAILABLE = False
+
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+    from cryptography.hazmat.primitives import hashes as _crypto_hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    ENCRYPTION_AVAILABLE = True
+except ImportError:
+    ENCRYPTION_AVAILABLE = False
 import faiss
 import numpy as np
 import ollama
@@ -29,7 +47,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate
+from reportlab.platypus import HRFlowable, Image as RLImage, Paragraph, SimpleDocTemplate
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
@@ -37,11 +55,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 from PyQt6.QtCore import QDate, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QAction, QColor, QKeySequence, QPixmap, QTextCharFormat
 from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QDateEdit, QDialog, QFileDialog, QFrame,
-    QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QPushButton,
-    QScrollArea, QSizePolicy, QSplitter, QStackedWidget, QTextEdit,
-    QToolBar, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDateEdit, QDialog, QFileDialog,
+    QFrame, QGroupBox, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressBar,
+    QPushButton, QScrollArea, QSizePolicy, QSplitter, QStackedWidget,
+    QTextEdit, QToolBar, QVBoxLayout, QWidget,
 )
 
 # ── constants ─────────────────────────────────────────────────────────────────
@@ -49,9 +67,20 @@ CHAT_MODEL       = "personaldentalassistantadvanced_xml"
 GENERAL_MODEL    = "llama3:8b"
 IMAGE_MODEL      = "gemma4:e4b"
 EMBED_MODEL_NAME = "all-MiniLM-L6-v2"
-CHUNK_SIZE       = 500
+CHUNK_SIZE       = 400   # characters per RAG chunk
+CHUNK_OVERLAP    = 80    # overlap between consecutive chunks
 RAG_TOP_K        = 3
 MAX_CONTEXT_CHARS = 5_000
+
+# Context window management
+# ~4 chars per token is a conservative estimate for clinical text
+CHARS_PER_TOKEN       = 4
+# Warn user when estimated tokens approach this
+CTX_WARN_TOKENS       = 2_800
+# Compress (summarise) when we exceed this
+CTX_COMPRESS_TOKENS   = 3_200
+# Keep this many most-recent turns verbatim after compression
+CTX_KEEP_RECENT_TURNS = 6
 
 TOOL_STATUS = {
     0: ("💬 Chat",                CHAT_MODEL),
@@ -197,63 +226,195 @@ QToolBar QToolButton:hover {{
 
 
 # =============================================================================
-# PERSISTENT HISTORY  — per-user, per-tool JSON store
+# AUTHENTICATION  — password hashing + credential store
 # =============================================================================
+
+# Root folder for all history data
+HISTORY_ROOT = Path("history")
+USERS_FILE   = HISTORY_ROOT / "users.json"   # credential registry
+
+# PBKDF2 parameters
+_PBKDF2_ITERS  = 260_000
+_PBKDF2_HASH   = "sha256"
+_SALT_BYTES    = 32
+
 
 def _history_path(username: str, kind: str) -> Path:
     """
-    Returns:  history/<safe_username>/<safe_username>_<kind>.json
-    The directory is created automatically if it does not exist.
+    Returns:  history/<safe_username>/<safe_username>_<kind>.enc
+    The .enc extension signals the file is Fernet-encrypted.
+    Falls back to .json if encryption is unavailable.
+    The directory is created automatically.
     """
-    safe    = re.sub(r"[^a-zA-Z0-9_\-]", "_", username.strip())
-    folder  = Path("history") / safe
+    safe   = re.sub(r"[^a-zA-Z0-9_\-]", "_", username.strip())
+    folder = HISTORY_ROOT / safe
     folder.mkdir(parents=True, exist_ok=True)
-    return folder / f"{safe}_{kind}.json"
+    ext = ".enc" if ENCRYPTION_AVAILABLE else ".json"
+    return folder / f"{safe}_{kind}{ext}"
 
 
-class HistoryStore:
+def _pbkdf2_hash(password: str, salt: bytes) -> bytes:
+    """Derive a 32-byte hash from password+salt using PBKDF2-HMAC-SHA256."""
+    return hashlib.pbkdf2_hmac(
+        _PBKDF2_HASH, password.encode("utf-8"), salt, _PBKDF2_ITERS)
+
+
+def _derive_fernet_key(password: str, salt: bytes) -> bytes:
     """
-    Generic session store backed by a single JSON file.
+    Derive a 32-byte AES key from password+salt using PBKDF2 via the
+    `cryptography` library, then base64url-encode it for Fernet.
+    A *different* salt than the auth hash ensures key and auth are independent.
+    """
+    if not ENCRYPTION_AVAILABLE:
+        return b""
+    kdf = PBKDF2HMAC(
+        algorithm=_crypto_hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=_PBKDF2_ITERS,
+    )
+    raw_key = kdf.derive(password.encode("utf-8"))
+    return base64.urlsafe_b64encode(raw_key)
 
-    Schema:
-    {
-      "username": "<name>",
-      "kind":     "chat" | "excel" | "rag",
-      "sessions": {
-        "<sid>": {
-          "title":    "Session title",
-          "created":  "ISO-8601",
-          "messages": [
-            {"role": "user"|"assistant", "content": "...", "ts": "ISO-8601"}
-          ]
+
+class AuthStore:
+    """
+    Manages user credentials in history/users.json.
+
+    Each entry:
+        {
+          "auth_salt":  "<hex>",   # salt used for password verification hash
+          "auth_hash":  "<hex>",   # PBKDF2-HMAC-SHA256(password, auth_salt)
+          "enc_salt":   "<hex>",   # separate salt used to derive Fernet key
         }
-      }
-    }
+
+    The enc_salt is stored alongside auth_salt so we can always re-derive
+    the same Fernet key for a given password without storing the key itself.
     """
 
-    def __init__(self, path: Path, username: str, kind: str):
-        self._path     = path
-        self._username = username
-        self._kind     = kind
-        self._data: dict = {"username": username, "kind": kind, "sessions": {}}
+    def __init__(self):
+        HISTORY_ROOT.mkdir(parents=True, exist_ok=True)
+        self._path = USERS_FILE
+        self._data: dict = {}
         self._load()
 
     def _load(self):
         if self._path.exists():
             try:
                 with open(self._path, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                # Safety: only accept data that belongs to this user+kind
-                if (loaded.get("username") == self._username and
-                        loaded.get("kind") == self._kind):
-                    self._data = loaded
+                    self._data = json.load(f)
             except Exception:
-                pass
+                self._data = {}
+
+    def _save(self):
+        with open(self._path, "w", encoding="utf-8") as f:
+            json.dump(self._data, f, indent=2)
+
+    def user_exists(self, username: str) -> bool:
+        return username.lower() in self._data
+
+    def register(self, username: str, password: str) -> bool:
+        """Create a new account. Returns False if username already taken."""
+        key = username.lower()
+        if key in self._data:
+            return False
+        auth_salt = secrets.token_bytes(_SALT_BYTES)
+        enc_salt  = secrets.token_bytes(_SALT_BYTES)
+        auth_hash = _pbkdf2_hash(password, auth_salt)
+        self._data[key] = {
+            "display_name": username,          # preserve original casing
+            "auth_salt":    auth_salt.hex(),
+            "auth_hash":    auth_hash.hex(),
+            "enc_salt":     enc_salt.hex(),
+        }
+        self._save()
+        return True
+
+    def verify(self, username: str, password: str) -> bool:
+        """Return True if password is correct for username."""
+        entry = self._data.get(username.lower())
+        if not entry:
+            return False
+        auth_salt = bytes.fromhex(entry["auth_salt"])
+        stored    = bytes.fromhex(entry["auth_hash"])
+        candidate = _pbkdf2_hash(password, auth_salt)
+        # Constant-time comparison to resist timing attacks
+        return secrets.compare_digest(stored, candidate)
+
+    def get_display_name(self, username: str) -> str:
+        entry = self._data.get(username.lower(), {})
+        return entry.get("display_name", username)
+
+    def get_enc_salt(self, username: str) -> Optional[bytes]:
+        entry = self._data.get(username.lower())
+        if not entry:
+            return None
+        return bytes.fromhex(entry["enc_salt"])
+
+    def fernet_key(self, username: str, password: str) -> Optional[bytes]:
+        """Derive the Fernet key for this user's encrypted files."""
+        enc_salt = self.get_enc_salt(username)
+        if enc_salt is None:
+            return None
+        return _derive_fernet_key(password, enc_salt)
+
+
+# Singleton credential store (process-wide)
+_auth_store: Optional[AuthStore] = None
+
+def get_auth_store() -> AuthStore:
+    global _auth_store
+    if _auth_store is None:
+        _auth_store = AuthStore()
+    return _auth_store
+
+
+# =============================================================================
+# PERSISTENT HISTORY  — per-user, per-tool encrypted store
+# =============================================================================
+
+
+class HistoryStore:
+    """
+    Generic session store backed by a single file.
+
+    When ENCRYPTION_AVAILABLE and a fernet_key is provided the file is
+    written as Fernet-encrypted binary (.enc).  Without the correct key
+    the content is unreadable ciphertext.  Falls back to plain JSON if
+    the cryptography package is not installed.
+    """
+
+    def __init__(self, path: Path, username: str, kind: str,
+                 fernet_key: Optional[bytes] = None):
+        self._path       = path
+        self._username   = username
+        self._kind       = kind
+        self._fernet_key = fernet_key
+        self._data: dict = {"username": username, "kind": kind, "sessions": {}}
+        self._load()
+
+    def _load(self):
+        if not self._path.exists():
+            return
+        try:
+            raw = self._path.read_bytes()
+            if self._fernet_key and ENCRYPTION_AVAILABLE:
+                raw = Fernet(self._fernet_key).decrypt(raw)
+            loaded = json.loads(raw.decode("utf-8"))
+            if (loaded.get("username") == self._username and
+                    loaded.get("kind") == self._kind):
+                self._data = loaded
+        except Exception:
+            # Wrong key, corrupted file, or unencrypted legacy file
+            pass
 
     def save(self):
         try:
-            with open(self._path, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, ensure_ascii=False, indent=2)
+            raw = json.dumps(
+                self._data, ensure_ascii=False, indent=2).encode("utf-8")
+            if self._fernet_key and ENCRYPTION_AVAILABLE:
+                raw = Fernet(self._fernet_key).encrypt(raw)
+            self._path.write_bytes(raw)
         except Exception as e:
             print(f"[HistoryStore:{self._kind}] save error: {e}")
 
@@ -329,6 +490,103 @@ class HistoryStore:
 
         results.sort(key=lambda r: r["created"], reverse=True)
         return results
+
+
+# =============================================================================
+# CONTEXT WINDOW MANAGER
+# =============================================================================
+
+def _estimate_tokens(messages: list[dict]) -> int:
+    """Fast token estimate: total character count / CHARS_PER_TOKEN."""
+    total = sum(len(m.get("content", "")) for m in messages)
+    return total // CHARS_PER_TOKEN
+
+
+class ContextManager:
+    """
+    Manages rolling context for any conversation list.
+
+    Usage:
+        ctx = ContextManager(model=CHAT_MODEL)
+        # Before each send:
+        messages, compressed = ctx.maybe_compress(messages)
+        if compressed:
+            inject a notice bubble into the UI
+
+    Compression strategy:
+        1. Keep the last CTX_KEEP_RECENT_TURNS message pairs verbatim.
+        2. Summarise everything older into a single system-style message.
+        3. This keeps the model oriented without losing recent context.
+    """
+
+    def __init__(self, model: str = GENERAL_MODEL):
+        self.model = model
+
+    # ── public ────────────────────────────────────────────────────────────────
+
+    def token_count(self, messages: list[dict]) -> int:
+        return _estimate_tokens(messages)
+
+    def needs_compression(self, messages: list[dict]) -> bool:
+        return self.token_count(messages) >= CTX_COMPRESS_TOKENS
+
+    def needs_warning(self, messages: list[dict]) -> bool:
+        tc = self.token_count(messages)
+        return CTX_WARN_TOKENS <= tc < CTX_COMPRESS_TOKENS
+
+    def maybe_compress(
+        self, messages: list[dict]
+    ) -> tuple[list[dict], bool]:
+        """
+        Returns (new_messages, was_compressed).
+        If compression was not needed, returns (messages, False) unchanged.
+        """
+        if not self.needs_compression(messages):
+            return messages, False
+
+        # Separate the turns we will summarise from those we keep verbatim
+        keep_count = CTX_KEEP_RECENT_TURNS * 2  # each turn = user + assistant
+        if len(messages) <= keep_count:
+            # Not enough history to split — nothing to do
+            return messages, False
+
+        old_msgs  = messages[:-keep_count]
+        keep_msgs = messages[-keep_count:]
+
+        # Build a plain-text transcript of the older turns for summarisation
+        transcript_lines = []
+        for m in old_msgs:
+            role = "User" if m["role"] == "user" else "Assistant"
+            transcript_lines.append(f"{role}: {m['content'][:400]}")
+        transcript = "\n".join(transcript_lines)
+
+        summary_prompt = (
+            "Summarise the following conversation excerpt into 3-5 concise "
+            "bullet points that capture the key topics, questions asked, and "
+            "answers given. Focus on facts relevant to continuing the conversation.\n\n"
+            f"{transcript}"
+        )
+        try:
+            resp = ollama.chat(
+                model=self.model,
+                messages=[{"role": "user", "content": summary_prompt}]
+            )
+            summary_text = resp["message"]["content"]
+        except Exception:
+            # If summarisation fails, just truncate — better than crashing
+            return keep_msgs, True
+
+        summary_msg = {
+            "role":    "system",
+            "content": (
+                "📋 [Context summary — earlier conversation compressed]\n"
+                + summary_text
+            ),
+            "ts": datetime.now().isoformat(timespec="seconds"),
+        }
+
+        new_messages = [summary_msg] + list(keep_msgs)
+        return new_messages, True
 
 
 # =============================================================================
@@ -427,11 +685,19 @@ class RagIndexWorker(QThread):
                         text = page.extract_text()
                         if not text:
                             continue
-                        for i in range(0, len(text), CHUNK_SIZE):
-                            c = text[i: i + CHUNK_SIZE].strip()
+                        # Overlapping sliding-window chunking:
+                        # stride = CHUNK_SIZE - CHUNK_OVERLAP ensures
+                        # each boundary sentence appears in two consecutive
+                        # chunks, preventing information loss at splits.
+                        stride = max(CHUNK_SIZE - CHUNK_OVERLAP, 50)
+                        pos = 0
+                        while pos < len(text):
+                            c = text[pos: pos + CHUNK_SIZE].strip()
                             if c:
                                 chunks.append(c)
-                                meta.append({"source": fname, "page": pn + 1})
+                                meta.append({"source": fname, "page": pn + 1,
+                                             "char_offset": pos})
+                            pos += stride
             if not chunks:
                 self.error.emit("No readable text found.")
                 return
@@ -441,6 +707,7 @@ class RagIndexWorker(QThread):
             self.done.emit({
                 "chunks": chunks, "metadata": meta,
                 "index": index, "embeddings": embeddings,
+                "chunk_size": CHUNK_SIZE, "chunk_overlap": CHUNK_OVERLAP,
             })
         except Exception as e:
             self.error.emit(str(e))
@@ -448,51 +715,47 @@ class RagIndexWorker(QThread):
 
 class ImageAnalysisWorker(QThread):
     """
-    Sends one image (as base64) plus a text question to the multimodal
-    Ollama model.  Uses a system-prompt message prepended to the conversation.
+    Sends the full conversation history to the multimodal model.
+
+    Each user turn that has an associated image path gets that image
+    embedded as base64 in the 'images' field, so the model retains
+    visual context across multiple questions within a session.
+
+    The system prompt is always prepended.
     """
     result = pyqtSignal(str)
     error  = pyqtSignal(str)
 
-    def __init__(self, image_path: str, question: str,
-                 history: list[dict]):
+    def __init__(self, messages: list[dict]):
         """
-        history  — previous {role, content} turns (text-only) for context.
-        image_path — path to the image file to include in THIS turn.
-        question   — user's text question for this turn.
+        messages — full session messages list, each dict has at minimum
+                   {"role": ..., "content": ...} and optionally
+                   {"image_path": "<path>"} on user turns.
         """
         super().__init__()
-        self.image_path = image_path
-        self.question   = question
-        self.history    = history   # prior turns, no images (model context)
+        self.messages = messages
 
     def run(self):
         try:
-            # Read and base64-encode the image
-            img_data = Path(self.image_path).read_bytes()
-            b64      = base64.b64encode(img_data).decode("utf-8")
-
-            # Build message list:
-            #   [system, ...history_text_only, user_with_image]
-            messages = [
-                {"role": "system", "content": IMAGE_SYSTEM_PROMPT},
+            ollama_msgs = [
+                {"role": "system", "content": IMAGE_SYSTEM_PROMPT}
             ]
-            # Append previous text turns for context (no images — most
-            # vision models only accept one image at a time)
-            for m in self.history:
-                messages.append({"role": m["role"], "content": m["content"]})
 
-            # Current user turn carries the image
-            messages.append({
-                "role":    "user",
-                "content": self.question,
-                "images":  [b64],
-            })
+            for m in self.messages:
+                msg: dict = {"role": m["role"], "content": m["content"]}
+                # Attach image if this user turn has one and the file exists
+                img_path = m.get("image_path", "")
+                if m["role"] == "user" and img_path and Path(img_path).exists():
+                    img_data = Path(img_path).read_bytes()
+                    msg["images"] = [
+                        base64.b64encode(img_data).decode("utf-8")
+                    ]
+                ollama_msgs.append(msg)
 
-            resp = ollama.chat(model=IMAGE_MODEL, messages=messages)
+            resp = ollama.chat(model=IMAGE_MODEL, messages=ollama_msgs)
             self.result.emit(resp["message"]["content"])
-        except FileNotFoundError:
-            self.error.emit(f"Image file not found: {self.image_path}")
+        except FileNotFoundError as e:
+            self.error.emit(f"Image file not found: {e.filename}")
         except ollama.ResponseError as e:
             self.error.emit(f"Model error: {e.error}")
         except Exception as e:
@@ -524,13 +787,18 @@ def _heading(text: str) -> QLabel:
 
 def export_session_to_pdf(title: str, messages: list[dict],
                            subtitle: str = "") -> bytes:
-    """Render any list of {role, content} messages as a styled PDF."""
+    """
+    Render any list of {role, content} messages as a styled PDF.
+    For image-analysis sessions, user turns that carry an 'image_path'
+    field have the actual image embedded inline (audit trail).
+    """
     buf  = io.BytesIO()
     doc  = SimpleDocTemplate(buf, pagesize=A4,
                              leftMargin=20*mm, rightMargin=20*mm,
                              topMargin=20*mm, bottomMargin=20*mm)
     stls = getSampleStyleSheet()
     teal = colors.HexColor("#0d9488")
+    usable_width = A4[0] - 40*mm   # page width minus margins
 
     story = [
         Paragraph("🦷 Dental AI Assistant",
@@ -558,16 +826,45 @@ def export_session_to_pdf(title: str, messages: list[dict],
                             backColor=colors.HexColor("#f1f5f9"),
                             borderPadding=(6, 8, 6, 8),
                             fontSize=10, leading=14, spaceAfter=8)
+    img_cap_s = ParagraphStyle("IC", parent=stls["Normal"],
+                                fontSize=8, textColor=colors.HexColor("#64748b"),
+                                spaceAfter=4, alignment=1)  # centred
 
     for msg in messages:
-        c = (msg["content"]
-             .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
-        # Strip internal role hints that may appear in excel/rag messages
+        c    = (msg["content"]
+                .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
         role = msg.get("role", "user")
+
         if role == "user":
-            story += [Paragraph("You", lbl_s), Paragraph(c, usr_s)]
+            story.append(Paragraph("You", lbl_s))
+            # Embed image if present (image-analysis audit trail)
+            img_path = msg.get("image_path", "")
+            if img_path and Path(img_path).exists():
+                try:
+                    # Scale image to fit within usable page width, max 120pt tall
+                    rl_img = RLImage(img_path)
+                    ratio  = rl_img.imageWidth / max(rl_img.imageHeight, 1)
+                    max_w  = float(usable_width) * 0.6
+                    max_h  = 120.0
+                    if ratio >= 1:
+                        w = min(max_w, rl_img.imageWidth)
+                        h = w / ratio
+                    else:
+                        h = min(max_h, rl_img.imageHeight)
+                        w = h * ratio
+                    rl_img.drawWidth  = w
+                    rl_img.drawHeight = h
+                    story.append(rl_img)
+                    story.append(Paragraph(
+                        f"<i>Image: {Path(img_path).name}</i>", img_cap_s))
+                except Exception:
+                    story.append(Paragraph(
+                        f"[Image could not be embedded: {Path(img_path).name}]",
+                        img_cap_s))
+            story.append(Paragraph(c, usr_s))
         else:
-            story += [Paragraph("Dental AI", lbl_s), Paragraph(c, ast_s)]
+            story.append(Paragraph("Dental AI", lbl_s))
+            story.append(Paragraph(c, ast_s))
 
     doc.build(story)
     return buf.getvalue()
@@ -635,7 +932,8 @@ class BaseSessionTab(QWidget):
     Subclasses implement _handle_send(text) and call
     _add_bubble / _append_to_last_bubble / _finalize.
     """
-    messages_changed = pyqtSignal()
+    messages_changed    = pyqtSignal()
+    token_count_updated = pyqtSignal(int)   # emitted after every message pair
 
     def __init__(self, session_id: str, title: str,
                  store: HistoryStore,
@@ -652,6 +950,7 @@ class BaseSessionTab(QWidget):
         self._bubbles: list[ChatBubble] = []
         self._user_label = user_label
         self._ai_label   = ai_label
+        self._ctx_mgr    = ContextManager()   # one manager per tab
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 10, 10, 10)
@@ -710,6 +1009,38 @@ class BaseSessionTab(QWidget):
         self.store.upsert_session(self.session_id, self.title, self.messages)
         self.messages_changed.emit()
 
+    def _emit_token_count(self):
+        """Emit current estimated token count for the status bar."""
+        self.token_count_updated.emit(
+            self._ctx_mgr.token_count(self.messages))
+
+    def _maybe_compress_and_warn(self) -> bool:
+        """
+        Check context size; compress if needed; insert notice bubble.
+        Returns True if compression happened.
+        """
+        if not self._ctx_mgr.needs_compression(self.messages):
+            return False
+        new_msgs, did_compress = self._ctx_mgr.maybe_compress(self.messages)
+        if did_compress:
+            self.messages = new_msgs
+            notice = ChatBubble(
+                "assistant",
+                label_override="⚙ System",
+                text=(
+                    "📋 Context compressed — earlier turns summarised to stay "
+                    "within the model's context window. Recent messages are intact."
+                ),
+            )
+            notice.text_label.setStyleSheet(
+                f"background:#f0fdf4;border:1px dashed {TEAL};"
+                "border-radius:10px;padding:8px 12px;font-size:12px;"
+                f"color:{TEAL_DARK};")
+            self._bubbles.append(notice)
+            self.msg_layout.addWidget(notice)
+            self._scroll_bottom()
+        return did_compress
+
     def scroll_to_message(self, idx: int):
         if 0 <= idx < len(self._bubbles):
             self.scroll.ensureWidgetVisible(self._bubbles[idx])
@@ -751,6 +1082,9 @@ class ChatTab(BaseSessionTab):
         self.messages.append({"role": "user", "content": text, "ts": ts})
         self._make_bubble("user", text, self._user_label)
 
+        # Compress context if needed before sending
+        self._maybe_compress_and_warn()
+
         self._current_bubble = self._make_bubble("assistant", "", self._ai_label)
         self._worker = ChatWorker(CHAT_MODEL, list(self.messages))
         self._worker.token_received.connect(self._on_token)
@@ -769,6 +1103,7 @@ class ChatTab(BaseSessionTab):
         ts = datetime.now().isoformat(timespec="seconds")
         self.messages.append({"role": "assistant", "content": full, "ts": ts})
         self._persist()
+        self._emit_token_count()
         self._set_enabled(True)
         self._current_bubble = None
 
@@ -865,6 +1200,9 @@ class ExcelSessionTab(BaseSessionTab):
         self._current_bubble = self._make_bubble("assistant", "⏳ Analysing…",
                                                   self._ai_label)
 
+        # Compress context if near limit before sending
+        self._maybe_compress_and_warn()
+
         # ── Chart (sync, quick) ────────────────────────────────────────────
         if self._df is not None and not self._df.empty and self._canvas:
             chart_prompt = (
@@ -913,6 +1251,7 @@ class ExcelSessionTab(BaseSessionTab):
         ts = datetime.now().isoformat(timespec="seconds")
         self.messages.append({"role": "assistant", "content": text, "ts": ts})
         self._persist()
+        self._emit_token_count()
         self._set_enabled(True)
         self._current_bubble = None
         self._scroll_bottom()
@@ -975,6 +1314,9 @@ class RagSessionTab(BaseSessionTab):
         self._current_bubble = self._make_bubble("assistant", "⏳ Thinking…",
                                                   self._ai_label)
 
+        # Compress context if near limit before retrieval
+        self._maybe_compress_and_warn()
+
         # RAG retrieval
         emb = _get_embed_model()
         qe  = emb.encode([q], show_progress_bar=False)
@@ -1027,6 +1369,7 @@ class RagSessionTab(BaseSessionTab):
         ts = datetime.now().isoformat(timespec="seconds")
         self.messages.append({"role": "assistant", "content": text, "ts": ts})
         self._persist()
+        self._emit_token_count()
         self._set_enabled(True)
         self._current_bubble = None
         self._scroll_bottom()
@@ -1052,6 +1395,7 @@ class GenericSessionPanel(QWidget):
     Right: QStackedWidget of session tabs.
     Subclasses provide _make_tab(sid, title, messages) → BaseSessionTab.
     """
+    token_count_updated = pyqtSignal(int)   # bubbles up to MainWindow
 
     def __init__(self, store: HistoryStore,
                  sidebar_title: str = "Sessions",
@@ -1126,6 +1470,9 @@ class GenericSessionPanel(QWidget):
     def _add_tab(self, sid: str, title: str,
                   messages: list[dict]) -> BaseSessionTab:
         tab = self._make_tab(sid, title, messages)
+        # Wire token count signal up to panel level so MainWindow can display it
+        if hasattr(tab, "token_count_updated"):
+            tab.token_count_updated.connect(self.token_count_updated)
         self.stack.addWidget(tab)
         item = QListWidgetItem(f"▸ {title}")
         item.setData(Qt.ItemDataRole.UserRole, sid)
@@ -1213,6 +1560,8 @@ class GenericSessionPanel(QWidget):
 # =============================================================================
 
 class ChatPanel(GenericSessionPanel):
+    token_count_updated = pyqtSignal(int)
+
     def __init__(self, store: HistoryStore, parent=None):
         super().__init__(store, sidebar_title="💬 Chat Sessions", parent=parent)
 
@@ -1285,6 +1634,7 @@ class ExcelSessionPanel(QWidget):
     Bottom section: GenericSessionPanel (sidebar + chat bubbles).
     The canvas is shared; each ExcelSessionTab gets a reference to it.
     """
+    token_count_updated = pyqtSignal(int)
 
     def __init__(self, store: HistoryStore, parent=None):
         super().__init__(parent)
@@ -1352,6 +1702,9 @@ class ExcelSessionPanel(QWidget):
 
         # Right: session panel
         self._session_panel = _ExcelInnerPanel(store, self.canvas)
+        # Forward token count from inner tabs up through this outer panel
+        self._session_panel.token_count_updated.connect(
+            self.token_count_updated)
         main_split.addWidget(self._session_panel)
         main_split.setSizes([380, 620])
         outer.addWidget(main_split, stretch=1)
@@ -1438,6 +1791,7 @@ class RagSessionPanel(QWidget):
     RAG index is rebuilt when new files are indexed and shared with
     the currently active session tab.
     """
+    token_count_updated = pyqtSignal(int)
 
     def __init__(self, store: HistoryStore, parent=None):
         super().__init__(parent)
@@ -1476,6 +1830,8 @@ class RagSessionPanel(QWidget):
 
         # ── session panel ─────────────────────────────────
         self._session_panel = _RagInnerPanel(store)
+        self._session_panel.token_count_updated.connect(
+            self.token_count_updated)
         outer.addWidget(self._session_panel, stretch=1)
 
         self._files: list[str] = []
@@ -1504,10 +1860,12 @@ class RagSessionPanel(QWidget):
     @pyqtSlot(dict)
     def _on_indexed(self, data: dict):
         self._rag_data = data
+        cs = data.get("chunk_size", CHUNK_SIZE)
+        co = data.get("chunk_overlap", CHUNK_OVERLAP)
         self.status_lbl.setText(
-            f"✅ Indexed {len(self._files)} file(s) "
-            f"→ {len(data['chunks'])} chunks. "
-            "Ready to answer questions.")
+            f"✅ Indexed {len(self._files)} file(s) → "
+            f"{len(data['chunks'])} chunks  "
+            f"(size {cs}, overlap {co}).  Ready to answer questions.")
         self.idx_btn.setEnabled(True)
         # Push to all existing tabs and any newly created ones
         self._session_panel.set_rag_data(data)
@@ -1713,7 +2071,8 @@ class ImageSessionTab(QWidget):
       │  [Attach Image]  Question input │ [Analyse ➤]
       └─────────────────────────────────┘
     """
-    messages_changed = pyqtSignal()
+    messages_changed    = pyqtSignal()
+    token_count_updated = pyqtSignal(int)
 
     def __init__(self, session_id: str, title: str,
                  store: "HistoryStore",
@@ -1731,6 +2090,7 @@ class ImageSessionTab(QWidget):
         self._bubbles: list[QFrame] = []
         self._current_image_path: str = ""
         self._worker: Optional[ImageAnalysisWorker] = None
+        self._ctx_mgr = ContextManager(model=IMAGE_MODEL)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(10, 10, 10, 10)
@@ -1942,18 +2302,11 @@ class ImageSessionTab(QWidget):
         self.messages.append(user_msg)
         self._make_bubble("user", question, self._current_image_path)
 
-        # placeholder assistant bubble
-        self._ai_bubble = self._make_bubble(
-            "assistant", "⏳ Analysing image…")
+        # Placeholder assistant bubble
+        self._ai_bubble = self._make_bubble("assistant", "⏳ Analysing image…")
 
-        # Build text-only history for context (strip image_path keys)
-        text_history = [
-            {"role": m["role"], "content": m["content"]}
-            for m in self.messages[:-1]  # exclude the just-added user msg
-        ]
-
-        self._worker = ImageAnalysisWorker(
-            self._current_image_path, question, text_history)
+        # Pass full messages list — worker attaches image to every user turn
+        self._worker = ImageAnalysisWorker(list(self.messages))
         self._worker.result.connect(self._on_result)
         self._worker.error.connect(self._on_error)
         self._worker.start()
@@ -1962,9 +2315,11 @@ class ImageSessionTab(QWidget):
     def _on_result(self, text: str):
         self._ai_bubble._text_label.setText(text)  # type: ignore[attr-defined]
         ts = datetime.now().isoformat(timespec="seconds")
-        self.messages.append(
-            {"role": "assistant", "content": text, "ts": ts})
+        self.messages.append({"role": "assistant", "content": text, "ts": ts})
         self._persist()
+        # Emit token count for status bar
+        self.token_count_updated.emit(
+            self._ctx_mgr.token_count(self.messages))
         self._set_enabled(True)
         self._scroll_bottom()
 
@@ -2008,6 +2363,7 @@ class ImageSessionPanel(QWidget):
     Top: model info + full disclaimer.
     Bottom: _ImageInnerPanel (sidebar + session tabs).
     """
+    token_count_updated = pyqtSignal(int)
 
     def __init__(self, store: "HistoryStore", parent=None):
         super().__init__(parent)
@@ -2062,6 +2418,9 @@ class ImageSessionPanel(QWidget):
 
         # ── session panel ─────────────────────────────────
         self._session_panel = _ImageInnerPanel(store)
+        # Forward token count updates from inner tabs up to MainWindow
+        self._session_panel.token_count_updated.connect(
+            self.token_count_updated)
         outer.addWidget(self._session_panel, stretch=1)
 
     def restore_session(self, sid: str, msg_index: int):
@@ -2278,56 +2637,182 @@ class SearchDialog(QDialog):
 
 
 # =============================================================================
-# LOGIN DIALOG
+# LOGIN / REGISTER DIALOG
 # =============================================================================
 
 class LoginDialog(QDialog):
+    """
+    Combined Login / Register dialog.
+
+    • If the username already exists  → Login mode: verifies password.
+    • If the username is new          → Register mode: creates account.
+
+    On success, exposes:
+        self.username     — display name (original casing)
+        self.fernet_key   — derived encryption key bytes (or None)
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Dental AI Assistant")
-        self.setFixedSize(420, 340)
+        self.setWindowTitle("Dental AI Assistant — Sign In")
+        self.setFixedSize(460, 420)
         self.setModal(True)
-        self.username = ""
+        self.username:   str            = ""
+        self.fernet_key: Optional[bytes] = None
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 32, 40, 32); lay.setSpacing(16)
+        lay.setContentsMargins(40, 28, 40, 28); lay.setSpacing(12)
 
+        # ── Brand ──────────────────────────────────────────
         ico = QLabel("🦷")
         ico.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ico.setStyleSheet("font-size:52px;")
+        ico.setStyleSheet("font-size:28px;")
         lay.addWidget(ico)
 
-        t = QLabel("Dental AI Assistant")
-        t.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        t.setStyleSheet(f"font-size:22px;font-weight:700;color:{TEXT};")
-        lay.addWidget(t)
+        title = QLabel("Dental AI Assistant")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(f"font-size:22px;font-weight:700;color:{TEXT};")
+        lay.addWidget(title)
 
-        s = QLabel("Private · Local · Powered by Ollama")
-        s.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        s.setStyleSheet(f"color:{MUTED};font-size:12px;")
-        lay.addWidget(s)
+        sub = QLabel("Private · Local · Powered by Ollama")
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub.setStyleSheet(f"color:{MUTED};font-size:12px;")
+        lay.addWidget(sub)
 
+        # ── Encryption status badge ─────────────────────────
+        if ENCRYPTION_AVAILABLE:
+            enc_badge = QLabel("🔒 End-to-end encrypted history")
+            enc_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            enc_badge.setStyleSheet(
+                f"background:{TEAL_LIGHT};color:{TEAL_DARK};"
+                "border-radius:10px;padding:3px 10px;font-size:11px;"
+                "font-weight:600;")
+        else:
+            enc_badge = QLabel(
+                "⚠️ cryptography not installed — history stored unencrypted\n"
+                "Run: pip install cryptography")
+            enc_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            enc_badge.setStyleSheet(
+                f"background:#fff7ed;color:#92400e;"
+                "border-radius:10px;padding:4px 10px;font-size:11px;")
+            enc_badge.setWordWrap(True)
+        lay.addWidget(enc_badge)
+
+        # ── Username ────────────────────────────────────────
         self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText(
-            "Your name / alias (e.g. Dr. Müller)")
+        self.name_input.setPlaceholderText("Username (e.g. Dr. Müller)")
         self.name_input.setMinimumHeight(38)
-        self.name_input.returnPressed.connect(self._login)
+        self.name_input.textChanged.connect(self._on_username_changed)
         lay.addWidget(self.name_input)
 
-        btn = QPushButton("Enter →"); btn.setMinimumHeight(40)
-        btn.clicked.connect(self._login); lay.addWidget(btn)
+        # ── Password ────────────────────────────────────────
+        pw_row = QHBoxLayout()
+        self.pw_input = QLineEdit()
+        self.pw_input.setPlaceholderText("Password")
+        self.pw_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pw_input.setMinimumHeight(38)
+        self.pw_input.returnPressed.connect(self._submit)
+        pw_row.addWidget(self.pw_input)
 
-        n = QLabel("All data stays on your machine.")
-        n.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        n.setStyleSheet("color:#94a3b8;font-size:11px;")
-        lay.addWidget(n)
+        show_cb = QCheckBox("Show")
+        show_cb.stateChanged.connect(
+            lambda s: self.pw_input.setEchoMode(
+                QLineEdit.EchoMode.Normal
+                if s == 2
+                else QLineEdit.EchoMode.Password))
+        pw_row.addWidget(show_cb)
+        lay.addLayout(pw_row)
 
-    def _login(self):
-        name = self.name_input.text().strip()
-        if not name:
-            QMessageBox.warning(self, "Required", "Please enter a name.")
+        # ── Confirm password (Register only) ────────────────
+        self.pw2_input = QLineEdit()
+        self.pw2_input.setPlaceholderText("Confirm password (new accounts)")
+        self.pw2_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.pw2_input.setMinimumHeight(38)
+        self.pw2_input.returnPressed.connect(self._submit)
+        lay.addWidget(self.pw2_input)
+
+        # ── Mode label ──────────────────────────────────────
+        self.mode_lbl = QLabel("")
+        self.mode_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.mode_lbl.setStyleSheet(f"color:{MUTED};font-size:11px;")
+        lay.addWidget(self.mode_lbl)
+
+        # ── Submit button ───────────────────────────────────
+        self.submit_btn = QPushButton("Sign In →")
+        self.submit_btn.setMinimumHeight(40)
+        self.submit_btn.clicked.connect(self._submit)
+        lay.addWidget(self.submit_btn)
+
+        note = QLabel("All data stays on your machine.")
+        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        note.setStyleSheet("color:#94a3b8;font-size:11px;")
+        lay.addWidget(note)
+
+    # ── helpers ───────────────────────────────────────────────────────────────
+
+    def _on_username_changed(self, text: str):
+        """Update UI to reflect Login vs Register mode as user types."""
+        stripped = text.strip()
+        if not stripped:
+            self.mode_lbl.setText("")
+            self.pw2_input.setVisible(True)
+            self.submit_btn.setText("Sign In →")
             return
-        self.username = name
+        exists = get_auth_store().user_exists(stripped)
+        if exists:
+            self.mode_lbl.setText("✅ Existing account — enter your password to log in")
+            self.pw2_input.setVisible(False)
+            self.submit_btn.setText("Log In →")
+        else:
+            self.mode_lbl.setText("🆕 New account — choose a password to register")
+            self.pw2_input.setVisible(True)
+            self.submit_btn.setText("Register & Sign In →")
+
+    def _submit(self):
+        username = self.name_input.text().strip()
+        password = self.pw_input.text()
+
+        if not username:
+            QMessageBox.warning(self, "Required", "Please enter a username.")
+            return
+        if len(password) < 8:
+            QMessageBox.warning(self, "Weak password",
+                "Password must be at least 8 characters.")
+            return
+
+        auth = get_auth_store()
+
+        if auth.user_exists(username):
+            # ── Login ──────────────────────────────────────
+            if not auth.verify(username, password):
+                QMessageBox.critical(self, "Wrong password",
+                    "Incorrect password. Please try again.")
+                self.pw_input.clear()
+                self.pw_input.setFocus()
+                return
+            self.username    = auth.get_display_name(username)
+            self.fernet_key  = (auth.fernet_key(username, password)
+                                if ENCRYPTION_AVAILABLE else None)
+        else:
+            # ── Register ───────────────────────────────────
+            pw2 = self.pw2_input.text()
+            if password != pw2:
+                QMessageBox.warning(self, "Mismatch",
+                    "Passwords do not match.")
+                return
+            ok = auth.register(username, password)
+            if not ok:
+                QMessageBox.warning(self, "Taken",
+                    "That username was just registered. Try logging in.")
+                return
+            self.username    = auth.get_display_name(username)
+            self.fernet_key  = (auth.fernet_key(username, password)
+                                if ENCRYPTION_AVAILABLE else None)
+            QMessageBox.information(self, "Account created",
+                f"Welcome, {self.username}!\n"
+                "Your history will be encrypted with your password.\n"
+                "If you forget your password your history cannot be recovered.")
+
         self.accept()
 
 
@@ -2336,19 +2821,20 @@ class LoginDialog(QDialog):
 # =============================================================================
 
 class MainWindow(QMainWindow):
-    def __init__(self, username: str):
+    def __init__(self, username: str, fernet_key: Optional[bytes] = None):
         super().__init__()
-        self.username = username
+        self.username    = username
+        self._fernet_key = fernet_key
         self.setWindowTitle(f"🦷 Dental AI Assistant  —  {username}")
         self.setMinimumSize(1200, 750)
         self._search_dlg: Optional[SearchDialog] = None
 
-        # ── Per-user stores ───────────────────────────────
+        # ── Per-user stores (encrypted with user's derived key) ────────
         self._stores = {
-            "chat":  HistoryStore(_history_path(username, "chat"),  username, "chat"),
-            "excel": HistoryStore(_history_path(username, "excel"), username, "excel"),
-            "rag":   HistoryStore(_history_path(username, "rag"),   username, "rag"),
-            "image": HistoryStore(_history_path(username, "image"), username, "image"),
+            "chat":  HistoryStore(_history_path(username, "chat"),  username, "chat",  fernet_key),
+            "excel": HistoryStore(_history_path(username, "excel"), username, "excel", fernet_key),
+            "rag":   HistoryStore(_history_path(username, "rag"),   username, "rag",   fernet_key),
+            "image": HistoryStore(_history_path(username, "image"), username, "image", fernet_key),
         }
 
         # ── Toolbar ──────────────────────────────────────
@@ -2445,6 +2931,13 @@ class MainWindow(QMainWindow):
 
         root.addWidget(sb_w); root.addWidget(self.stack)
 
+        # ── Wire token count signals from all session panels ──
+        self._last_token_count: int = 0
+        for panel in (self._chat_panel, self._excel_panel,
+                      self._rag_panel, self._image_panel):
+            if hasattr(panel, "token_count_updated"):
+                panel.token_count_updated.connect(self._on_token_count)
+
         self._status_bar = self.statusBar()
         self._switch_tool(0)
 
@@ -2454,9 +2947,32 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(idx)
         for i, btn in enumerate(self._nav_btns):
             btn.setChecked(i == idx)
+        self._refresh_status_bar()
+
+    def _refresh_status_bar(self):
+        """Rebuild the status bar message with current tool + token count."""
+        idx   = self.stack.currentIndex()
         label, model = TOOL_STATUS.get(idx, ("", ""))
+        tc    = self._last_token_count
+
+        if tc == 0:
+            tok_str = ""
+        elif tc >= CTX_COMPRESS_TOKENS:
+            tok_str = f"  ·  ⚠️ ~{tc:,} tokens (compressing)"
+        elif tc >= CTX_WARN_TOKENS:
+            tok_str = f"  ·  🟡 ~{tc:,} tokens (context filling)"
+        else:
+            tok_str = f"  ·  🟢 ~{tc:,} tokens"
+
         self._status_bar.showMessage(
-            f"Ready  ·  {label}  ·  model: {model}  ·  user: {self.username}")
+            f"Ready  ·  {label}  ·  model: {model}"
+            f"  ·  user: {self.username}{tok_str}")
+
+    @pyqtSlot(int)
+    def _on_token_count(self, count: int):
+        """Slot called whenever any session tab emits a new token count."""
+        self._last_token_count = count
+        self._refresh_status_bar()
 
     # ── search ────────────────────────────────────────────────────────────────
 
@@ -2518,7 +3034,7 @@ def _start_login():
     dlg = LoginDialog()
     if dlg.exec() == QDialog.DialogCode.Accepted:
         global _main_win
-        _main_win = MainWindow(dlg.username)
+        _main_win = MainWindow(dlg.username, fernet_key=dlg.fernet_key)
         _main_win.setStyleSheet(APP_STYLESHEET)
         _main_win.show()
 

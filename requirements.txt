@@ -1,0 +1,15 @@
+PyQt6 
+ollama 
+faiss-cpu 
+numpy 
+pandas 
+pdfplumber 
+requests     
+beautifulsoup4 
+reportlab 
+sentence-transformers 
+scikit-learn   
+matplotlib 
+openpyxl 
+lxml
+cryptography
