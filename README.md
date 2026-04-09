@@ -1,530 +1,310 @@
-# 🦷 Multimodal (text, image) Dental AI Assistant
+# Dental AI Assistant
 
-A comprehensive, private, desktop AI application for dental professionals. Built with **PyQt6** and powered by local **Ollama** LLMs, your data never leaves your machine (for research and information purpose only).
+A local-first PyQt6 desktop assistant for dental workflows. The app runs against local Ollama models for chat, document Q&A, summaries, spreadsheet analysis, and dental image analysis. User history is stored per account under `history/`, with encrypted `.enc` files when `cryptography` is available.
 
----
+This project is intended for educational and informational use only. It is not a medical device and does not provide diagnosis or clinical advice.
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [Features](#-features)
-  - [User Isolation & Login](#-user-isolation--login)
-  - [Chat (Tool 0)](#-chat-tool-0)
-  - [PDF Summary (Tool 1)](#-pdf-summary-tool-1)
-  - [Website Summary (Tool 2)](#-website-summary-tool-2)
-  - [Excel Analysis (Tool 3)](#-excel-analysis-tool-3)
-  - [Ask Your Document / RAG (Tool 4)](#-ask-your-document--rag-tool-4)
-  - [Dental Image Analysis (Tool 5)](#-dental-image-analysis-tool-5)
-  - [Global Search (Ctrl+F)](#-global-search-ctrlf)
-- [Installation](#-installation)
+- [Features](#features)
+- [Models Used](#models-used)
+- [Installation](#installation)
   - [Prerequisites](#prerequisites)
-  - [Python Dependencies](#python-dependencies)
-  - [Running the Application](#running-the-application)
-- [Usage Guide](#-usage-guide)
-  - [First Launch](#first-launch)
-  - [Using Chat](#using-chat)
-  - [Analyzing Excel Files](#analyzing-excel-files)
-  - [Using RAG](#using-rag)
-  - [Searching History](#searching-history)
-  - [Exporting Conversations](#exporting-conversations)
-- [Architecture](#-architecture)
-  - [Class Hierarchy](#class-hierarchy)
-  - [Worker Threads](#worker-threads)
-- [Data Persistence](#-data-persistence)
-  - [Session Management](#session-management)
-  - [Storage Location](#storage-location)
-  - [JSON Schema](#json-schema)
-- [Keyboard Shortcuts](#-keyboard-shortcuts)
-- [System Requirements](#-system-requirements)
-  - [Model Requirements](#model-requirements)
-- [Troubleshooting](#-troubleshooting)
-- [Privacy & Security](#-privacy--security)
-- [Useful Tools](#-useful-tools)
-- [Contact & Support](#-contact--support)
+  - [Python dependencies](#python-dependencies)
+- [Run](#run)
+- [Usage Notes](#usage-notes)
+  - [First launch](#first-launch)
+  - [History and exports](#history-and-exports)
+  - [Context management](#context-management)
+- [Data Storage](#data-storage)
+  - [Layout](#layout)
+  - [Session structure](#session-structure)
+- [Main Components](#main-components)
+- [Keyboard Shortcut](#keyboard-shortcut)
+- [Sample Files](#sample-files)
+- [Troubleshooting](#troubleshooting)
+  - [Ollama model errors](#ollama-model-errors)
+  - [PDF text extraction issues](#pdf-text-extraction-issues)
+  - [Excel loading issues](#excel-loading-issues)
+  - [Encryption behavior](#encryption-behavior)
+- [Privacy and Safety](#privacy-and-safety)
+- [License](#license)
 
----
+## Features
 
-## ✨ Features
-
-### 🔐 User Isolation & Login
-- **Private login system**: Each user has isolated data
-- **Per-user storage**: Chat history, Excel sessions, and RAG index are completely separate per user
-- **Local-first**: All data saved to local JSON files with no cloud dependency
+### Secure login and per-user storage
+- Combined sign-in and registration flow in the app.
+- Password-based user accounts stored in `history/users.json`.
+- Per-user history files for `chat`, `excel`, `rag`, and `image`.
+- Fernet-encrypted history files (`.enc`) when `cryptography` is installed.
+- If encryption support is unavailable, the app falls back to plain JSON history.
 
 ![Login Screen](assests/login.png)
 
-### 💬 Chat (Tool 0)
-Your general-purpose dental AI assistant.
+### 1. Chat
+- General dental assistant chat using the custom Ollama model `personaldentalassistantadvanced_xml`.
+- Streaming token-by-token responses.
+- Multiple persistent chat sessions with create, rename, and delete actions.
+- Context window monitoring in the status bar.
+- Automatic conversation compression when the history gets too large.
+- PDF export for the active chat session.
 
-**Key Features:**
-- **Conversations**: Full conversational chat interface with scrollable message bubbles
-- **Streaming responses**: Tokens appear in real-time
-- **Multiple sessions**: Create, rename, and delete chat sessions
-- **Persistent history**: All conversations autosaved
-- **Session sidebar**: Quick navigation between different conversation threads
-- **Export to PDF**: Save any chat session as a formatted PDF document
--  **Multilingual support**: Chat in multiple languages
+![Chat](assests/chat.png)
+![Chat Variant](assests/chat_1.png)
 
-**AI Model:** `personaldentalassistantadvanced_xml` (dental-specialized)
+### 2. PDF Summary
+- Loads a PDF and extracts readable text with `pdfplumber`.
+- Summary lengths: `Short (1-2 paragraphs)`, `Medium`, or `Detailed`.
+- Optional focus field for topic-specific summaries.
+- Uses the general model `llama3:8b`.
 
-![Login Screen](assests/chat.png)
+![PDF Summary](assests/pdf_summary.png)
 
-![Login Screen](assests/chat_1.png)
+### 3. Website Summary
+- Fetches public `http://` or `https://` pages with a 15 second timeout.
+- Extracts text from `<article>`, `<main>`, or paragraph fallback content.
+- Summarizes the extracted text with `llama3:8b`.
 
----
+Note: this tool makes a real web request to the target site, so it is not fully offline like the other local-only tools.
 
-### 📄 PDF Summary (Tool 1)
-Extract and summarize dental reports, research papers, or any PDF document.
+![Website Summary](assests/url_summary.png)
 
-**Key Features:**
-- Upload any PDF file via file browser
-- Select summary length: **Short** (1-2 paragraphs) | **Medium** | **Detailed**
-- Focus mode: Optionally specify topics to emphasize (e.g., "Periodontitis procedures")
-- Displays extracted character count
-- Clean, formatted output
+### 4. Excel Analysis
+- Loads `.xlsx` and `.xls` workbooks with pandas.
+- Supports multiple sheets and sheet switching.
+- Builds answers from workbook context across sheets.
+- Attempts automatic bar or line chart generation based on the user question.
+- Keeps persistent Excel analysis sessions per user.
+- Supports PDF export for the active Excel session.
 
-**AI Model:** `llama3:8b` (general purpose)
+![Excel Analysis](assests/excel_analysis.png)
 
-![Login Screen](assests/pdf_summary.png)
+### 5. Ask Your Document (RAG)
+- Indexes one or more PDFs with `pdfplumber`.
+- Splits text into overlapping chunks.
+- Creates embeddings with `sentence-transformers/all-MiniLM-L6-v2`.
+- Stores vectors in an in-memory FAISS index.
+- Retrieves the top relevant chunks and answers with citations like `[Source 1]`.
+- Shows a relevance score bar for the last answer.
+- Supports PDF export for the active RAG session.
 
----
+![RAG](assests/rag.png)
 
-### 🌐 Website Summary (Tool 2)
-Fetch and summarize any public web page instantly.
+### 6. Dental Image Analysis
+- Dedicated multimodal workflow for dental X-rays, photos, and scans.
+- Uses the Ollama model `gemma4:e4b`.
+- Supports common formats including `.jpg`, `.jpeg`, `.png`, `.bmp`, `.gif`, `.tiff`, `.tif`, and `.webp`.
+- Stores the attached image path with each user turn so follow-up questions keep visual context.
+- Shows a thumbnail in the session and embeds images into exported PDFs for auditability.
+- Includes prominent educational-use-only disclaimers in the UI and system prompt.
 
-**Key Features:**
-- Paste any HTTP/HTTPS URL
-- Automatic content extraction from `<article>` or `<main>` tags
-- Clean text extraction fallback
-- 15-second timeout protection
-- One-click fetch and analyze
+![Image Analysis 1](assests/image_1.png)
+![Image Analysis 2](assests/image_2.png)
 
-**AI Model:** `llama3:8b`
+### Global search
+- Open with `Ctrl+F` or the toolbar action.
+- Searches the current user's stored history across:
+  - Chat
+  - Excel Analysis
+  - Ask Your Document
+  - Image Analysis
+- Optional date-range filtering.
+- Result preview with keyword highlighting.
+- Double-click a result to jump directly to the matching message.
 
-![Login Screen](assests/url_summary.png)
----
+![Global Search](assests/global_Search.png)
 
-### 📊 Excel Analysis (Tool 3)
-Interactive spreadsheet analysis with AI-powered insights and automatic charting.
+## Models Used
 
-**Key Features:**
-- **Multi-sheet support**: Load `.xlsx` or `.xls` files with multiple sheets
-- **Sheet preview**: Browse data before asking questions
-- **Chat interface**: Ask natural language questions about your data
-- **Auto-charting**: AI automatically generates bar or line charts based on your question
-  - Analyzes column names
-  - Selects appropriate visualization type
-  - Displays in real-time alongside answers
-- **Multiple analysis sessions**: Create separate chat sessions for different analyses
-- **Session sidebar**: Manage Excel Q&A sessions independently
-- **Export to PDF**: Save data conversations as documents
+The script currently expects these Ollama models:
 
-**Interface Layout:**
-```
-┌─────────────────────────────────────────────────────┐
-│  File: patient_data.xlsx   📂 Browse              │
-│  Sheet: [Sheet1 ▼]   (3 sheets total)             │
-├──────────────────┬────────────────────────────────┤
-│  Data Preview    │  Chat Session: Excel 1        │
-│  ┌────────────┐   │  ┌──────────────────────┐    │
-│  │ Patient    │   │  │ 👤 You: What's the   │    │
-│  │ Age    BP  │   │  │   average BP by age? │    │
-│  │ ───────────────────                        │
-│  │ 25    120  │   │  │ 📊 Excel AI: ...     │    │
-│  │ 45    135  │   │  └──────────────────────┘    │
-│  └────────────┘   │                              │
-│  📊 [Chart]      │  [Ask another...    ] [Send] │
-│                  │                                │
-├──────────────────┴────────┬───────────────────┤
-│  Sessions:               │  + New | ✏ Rename | 🗑 Delete │
-│  ▸ Excel 1                           | ⬇ Export PDF    │
-│  ▸ Excel 2                                           │
-└─────────────────────────────────────────────────────┘
-```
+| Purpose | Model |
+|---|---|
+| Chat | `personaldentalassistantadvanced_xml` |
+| PDF Summary | `llama3:8b` |
+| Website Summary | `llama3:8b` |
+| Excel Analysis | `llama3:8b` |
+| RAG answer generation | `llama3:8b` |
+| Image Analysis | `gemma4:e4b` |
+| Embeddings | `all-MiniLM-L6-v2` |
 
-**AI Model:** `llama3:8b`
+## Installation
 
-![Login Screen](assests/excel_analysis.png)
+### Prerequisites
 
----
+1. Install Python 3.10 or newer.
+2. Install [Ollama](https://ollama.com/download).
+3. Pull the required Ollama models:
 
-### 🧠 Ask Your Document / RAG (Tool 4)
-**Retrieval-Augmented Generation** for your own document collections.
-
-**Key Features:**
-- **Multi-PDF indexing**: Select and index one or multiple PDFs at once
-- **Semantic search**: Uses `all-MiniLM-L6-v2` embeddings for document understanding
-- **Vector database**: FAISS-powered similarity search
-- **Chat interface**: Natural Q&A with citation support
-- **Relevance scoring**: Visual confidence indicator for each answer
-  - 🟢 High (≥75%)
-  - 🟡 Medium (50-74%)
-  - 🔴 Low (<50%)
-- **Source citations**: Answers reference specific source documents and page numbers
-- **Multiple sessions**: Separate Q&A sessions for different document sets
-- **Session sidebar**: Manage RAG sessions independently
-- **Export to PDF**: Save RAG conversations as documents
-
-**How it works:**
-1. Select PDF files to index
-2. Click "Index Documents" → creates vector embeddings
-3. Ask questions → AI retrieves relevant chunks
-4. View confidence score and get cited answers
-
-**Interface Layout:**
-```
-┌─────────────────────────────────────────────────────┐
-│  Files: doc1.pdf; doc2.pdf   📂 Browse PDFs         │
-│  [  Index Documents  ]                              │
-│  ✅ Indexed 2 files → 47 chunks. Ready.             │
-├───────────────────────────────────────-─────────────┤
-│  Chat Session: RAG 1                                │
-│  ┌─────────────────────────────────────────────┐     │
-│  │ 👤 You: What are the side effects of...     │     │
-│  │ ──────────────────────────────────────────────     │
-│  │ 🧠 RAG AI: According to [Source 1, page 4]...   │
-│  └─────────────────────────────────────────────┘     │
-│  ┌────────────┐                                     │
-│  │ Relevance Score (last answer)                    │
-│  │ [██████████░░░░] 78%  High ✅                     │
-│  └────────────┘                                     │
-│  [Ask your question...    ] [Send]                  │
-│                                                     │
-├──────────────────────────-───────────-──────────────┤
-│  Sessions:  ▸ RAG 1  |  + New | ✏ Rename | 🗑 Delete │
-│             ▸ RAG 2  |  ⬇ Export PDF                │
-└─────────────────────────────────────────────────────┘
+```bash
+ollama pull llama3:8b
+ollama pull gemma4:e4b
 ```
 
-**AI Model:** `llama3:8b`  
-**Embeddings:** `sentence-transformers/all-MiniLM-L6-v2`
+4. Create the custom dental chat model:
 
-![Login Screen](assests/rag.png)
-
-
----
-
-### 🦷 Dental Image Analysis (Tool 5)
-
-
-**AI Model:** `gemma4:e4b`  
-
-![Login Screen](assests/image_1.png)
-
-![Login Screen](assests/image_2.png)
-
-
----
-
-## 🔍 Global Search (Ctrl+F)
-
-**Search across ALL your history** across all tools and sessions.
-
-**Search Capabilities:**
-- 🔎 **Keyword search**: Find specific terms in any message
-- 📅 **Date range filtering**: Filter by creation date
-- 📂 **Scope selection**: Choose which tools to search
-  - 💬 Chat sessions
-  - 📊 Excel Analysis sessions
-  - 🧠 RAG sessions
-- 📜 **Result preview**: See highlighted snippets before opening
-- 🎯 **Quick navigation**: Double-click to jump directly to message
-- 📊 **Result statistics**: Shows count of results and distinct sessions
-
-**Search Dialog Layout:**
-```
-┌──────────────────────────────────────────────────────┐
-│  🔍 Search Chat History                              │
-│  [keyword                      ] [Search] [Clear]     │
-│  Search in: [💬 Chat☑] [📊 Excel☑] [🧠 RAG☑]        │
-│  ┌───── Date Range Filter ─────────────────────────┐ │
-│  │ [✓ Date Filter Active]  From: [01 Jan 2024 ▼] │ │
-│  │                          To:   [01 Apr 2026 ▼] │ │
-│  └──────────────────────────────────────────────────┘ │
-│  47 result(s) across 8 session(s)                      │
-│  ┌─────────────────────────────────────────────┐     │
-│  │ 💬👤 [2024-05-12] Chat 1  —  ...patient had │     │
-│  │ 📊🤖 [2024-05-15] Excel 2 —  ...average is  │     │
-│  │ 🧠👤 [2024-05-18] RAG 3   —  ...according to │     │
-│  └─────────────────────────────────────────────┘     │
-│  ┌── Message Preview ──────────────────────────┐     │
-│  │ ...patient had **severe** reactions...      │     │
-│  └─────────────────────────────────────────────┘     │
-│                 [Open Session ↗]  [Close]            │
-└──────────────────────────────────────────────────────┘
+```bash
+ollama create personaldentalassistantadvanced_xml -f system_prompt/personaldentalassistant.modelfile
 ```
 
-![Login Screen](assests/global_Search.png)
+### Python dependencies
 
----
+Install from `requirements.txt`:
 
-## 📝 Data Persistence
-
-### Session Management
-Each tool maintains independent session lists:
-
-| Tool | Session File | Features |
-|------|-------------|----------|
-| 💬 Chat | `{username}_chat.json` | Multiple conversations, streaming |
-| 📊 Excel | `{username}_excel.json` | Per-session file binding |
-| 🧠 RAG | `{username}_rag.json` | Indexed document metadata |
-
-### Storage Location
+```bash
+pip install -r requirements.txt
 ```
+
+Current `requirements.txt` includes:
+
+```text
+PyQt6
+ollama
+faiss-cpu
+numpy
+pandas
+pdfplumber
+requests
+beautifulsoup4
+reportlab
+sentence-transformers
+scikit-learn
+matplotlib
+openpyxl
+lxml
+cryptography
+```
+
+## Run
+
+```bash
+python dental_ai_chatbot.py
+```
+
+## Usage Notes
+
+### First launch
+- Enter a username.
+- If the username does not exist yet, the app switches to registration mode.
+- New accounts require a password with at least 8 characters.
+- Existing accounts prompt for password login.
+
+### History and exports
+- Chat, Excel, RAG, and Image Analysis sessions are persisted per user.
+- Export is available for Chat, Excel Analysis, Ask Your Document, and Image Analysis.
+- PDF Summary and Website Summary are not session-based and are not exported through the toolbar.
+
+### Context management
+- The app estimates token usage from conversation length.
+- When a session grows large, earlier turns may be summarized into a compact system message so the conversation can continue.
+- The status bar shows the active tool, active model, user, and approximate context size.
+
+## Data Storage
+
+### Layout
+
+```text
 history/
-└── {username}/
-    ├── {username}_chat.json
-    ├── {username}_excel.json
-    └── {username}_rag.json
+├── users.json
+└── <safe_username>/
+    ├── <safe_username>_chat.enc
+    ├── <safe_username>_excel.enc
+    ├── <safe_username>_rag.enc
+    └── <safe_username>_image.enc
 ```
 
-### JSON Schema
+If encryption is unavailable, the same files use `.json` instead of `.enc`.
+
+### Session structure
+
+Each tool store contains a structure like:
+
 ```json
 {
   "username": "Dr_Smith",
   "kind": "chat",
   "sessions": {
-    "abc123": {
-      "title": "Root Canal Discussion",
-      "created": "2024-05-15T09:30:00",
+    "08b31556": {
+      "title": "Session 1",
+      "created": "2026-04-09T15:10:00",
       "messages": [
-        {"role": "user", "content": "...", "ts": "..."},
-        {"role": "assistant", "content": "...", "ts": "..."}
+        {
+          "role": "user",
+          "content": "Example question",
+          "ts": "2026-04-09T15:10:02"
+        },
+        {
+          "role": "assistant",
+          "content": "Example answer",
+          "ts": "2026-04-09T15:10:05"
+        }
       ]
     }
   }
 }
 ```
 
----
+Image-analysis user messages also include an `image_path` field.
 
-## 🚀 Installation
+## Main Components
 
-### Prerequisites
+- `AuthStore`: user registration, login verification, and encryption key derivation.
+- `HistoryStore`: per-user session persistence and search.
+- `ContextManager`: token estimation and conversation compression.
+- `ChatWorker`: streaming chat responses.
+- `OllamaWorker`: background non-streaming LLM calls.
+- `FetchWebWorker`: webpage retrieval and extraction.
+- `RagIndexWorker`: PDF chunking, embedding, and FAISS index creation.
+- `ImageAnalysisWorker`: multimodal image conversation handling.
+- `MainWindow`: tool routing, toolbar actions, and status bar updates.
 
-1. **Ollama** (Local LLM server)
-   ```bash
-   # macOS/Linux
-   curl -fsSL https://ollama.com/install.sh | sh
-   
-   # Windows: Download from https://ollama.com/download
-   ```
+## Keyboard Shortcut
 
-2. **Python 3.10+**
+- `Ctrl+F`: open global history search.
 
-3. **Required Models**
-   ```bash
-   # Pull a general model
-   ollama pull llama3:8b
-   ollama pull gemma4:31b
-   
-   # Or create a custom model based on llama3:8b using system prompt
-   ollama create personaldentalassistantadvanced_xml -f personaldentalassistant.modelfile
-   ```
+## Sample Files
 
-### Python Dependencies
+The repository includes sample data you can use for testing:
 
-```bash
-pip install PyQt6 ollama pandas openpyxl pdfplumber \
-            beautifulsoup4 requests faiss-cpu \
-            sentence-transformers scikit-learn \
-            matplotlib reportlab
-```
+- `sample_data_for_testing/dental_clinic_data.xlsx`
+- `sample_data_for_testing/VisitsToPublicSectorDentalClinicsAnnual.xlsx`
+- `sample_data_for_testing/B1639-cinical-guide-to-dentistry-september-2023-Part1.pdf`
+- `sample_data_for_testing/B1639-cinical-guide-to-dentistry-september-2023-Part2.pdf`
+- `sample_data_for_testing/dental_x_ray/`
 
-Or use requirements.txt:
-```bash
-pip install -r requirements.txt
-```
+There is also an example exported PDF in `exported_report_example/08b31556.pdf`.
 
-**requirements.txt:**
-```
-PyQt6>=6.6.0
-ollama>=0.1.0
-pandas>=2.0.0
-openpyxl>=3.1.0
-pdfplumber>=0.10.0
-beautifulsoup4>=4.12.0
-requests>=2.31.0
-faiss-cpu>=1.7.4
-sentence-transformers>=2.2.0
-scikit-learn>=1.3.0
-matplotlib>=3.7.0
-reportlab>=4.0.0
-numpy>=1.24.0
-```
+## Troubleshooting
 
-### Running the Application
+### Ollama model errors
+If the app reports a missing model, make sure these commands have been run:
 
-```bash
-python dental_ai_chatbot.py
-```
-
----
-
-## 📖 Usage Guide
-
-### First Launch
-
-1. Start Ollama server
-2. Run the application
-3. Enter your name/alias (e.g., "Dr. Müller")
-4. Click "Enter →"
-
-### Using Chat
-1. Click 💬 **Chat** in left sidebar
-2. Type your dental question
-3. Press Enter or click **Send**
-4. Create new sessions with **＋ New Session**
-5. Switch between sessions via sidebar
-
-### Analyzing Excel Files
-1. Click 📊 **Excel Analysis**
-2. Click **Browse…** and select `.xlsx`/`.xls` file
-3. Choose sheet from dropdown to preview
-4. Ask questions in the chat panel
-5. Charts auto-generate based on question context
-
-### Using RAG (Ask Your Document)
-1. Click 🧠 **Ask Your Document**
-2. Click **Browse PDFs…** and select one or more files
-3. Click **Index Documents** (one-time per document set)
-4. Ask questions in the RAG chat panel
-5. Watch the relevance score and source citations
-
-### Searching History
-1. Press **Ctrl+F** or click 🔍 in toolbar
-2. Enter keyword
-3. Optionally enable date filter
-4. Select tool scopes (Chat/Excel/RAG)
-5. Double-click result to jump to message
-
-### Exporting Conversations
-1. Navigate to Chat, Excel, or RAG panel
-2. Click **⬇ Export PDF** in sidebar
-3. Choose save location
-4. PDF includes all messages with timestamps
-
----
-
-## 🏗️ Architecture
-
-### Class Hierarchy
-
-```
-MainWindow
-├── LoginDialog
-├── SearchDialog
-├── ChatPanel (GenericSessionPanel)
-│   └── ChatTab (BaseSessionTab)
-├── PdfSummaryPanel
-├── WebsiteSummaryPanel
-├── ExcelSessionPanel
-│   ├── MatplotlibCanvas
-│   └── _ExcelInnerPanel (GenericSessionPanel)
-│       └── ExcelSessionTab (BaseSessionTab)
-├── RagSessionPanel
-│   └── _RagInnerPanel (GenericSessionPanel)
-│       └── RagSessionTab (BaseSessionTab)
-└── HistoryStore (JSON persistence)
-
-ChatBubble (Shared UI component)
-```
-
-### Worker Threads
-
-All AI operations run asynchronously to keep UI responsive:
-
-| Worker | Purpose |
-|--------|---------|
-| `ChatWorker` | Streaming chat responses |
-| `OllamaWorker` | Single-prompt completions |
-| `FetchWebWorker` | HTTP web scraping |
-| `RagIndexWorker` | PDF → embeddings + FAISS index |
-
----
-
-## ⌨️ Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+F` | Open Global Search dialog |
-| `Enter` | Send message (in chat inputs) |
-| `Ctrl+W` | Close current window |
-
----
-
-## 🖥️ System Requirements
-
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
-| Python | 3.10 | 3.11+ |
-| RAM | 8 GB | 16 GB+ |
-| Storage | 2 GB | 10 GB+ (for models) |
-| GPU | None (CPU-only) | NVIDIA with CUDA |
-
-### Model Requirements
-
-| Model | Size | Purpose |
-|-------|------|---------|
-| `llama3:8b` | ~4.7 GB | General chat, summaries, Excel, RAG |
-| `personaldentalassistantadvanced_xml` | Variable | Specialized dental Q&A |
-
----
-
-## 🛠️ Troubleshooting
-
-### "Model not found" error
 ```bash
 ollama pull llama3:8b
+ollama pull gemma4:e4b
+ollama create personaldentalassistantadvanced_xml -f system_prompt/personaldentalassistant.modelfile
 ```
 
-### PDF extraction fails
-- Ensure PDF has selectable text (not scanned images)
-- For scanned documents, pre-process with OCR
+### PDF text extraction issues
+- `pdfplumber` works best with PDFs that already contain selectable text.
+- Scanned PDFs without OCR may produce little or no extracted text.
 
-### Excel won't load
-- Verify file format: `.xlsx` or `.xls`
-- Check for password protection
-- Ensure pandas can read: `pd.read_excel(r"path")`
+### Excel loading issues
+- Confirm the file is `.xlsx` or `.xls`.
+- Password-protected or corrupted workbooks may fail to load.
 
-### FAISS/Embeddings errors
-```bash
-pip install --upgrade sentence-transformers faiss-cpu
-```
+### Encryption behavior
+- With `cryptography` installed, session history is encrypted on disk.
+- If you change or forget the account password, encrypted history cannot be recovered through the app.
 
-### Search not finding results
-- Check `history/` folder exists with your username
-- Verify JSON files are valid
+## Privacy and Safety
 
----
+- Most AI inference is local through Ollama.
+- No cloud API keys are required.
+- User history is isolated by account.
+- Website Summary fetches remote web content from the URL you provide.
+- Dental image analysis is informational only and must not be used as a clinical diagnosis.
 
-## 🔒 Privacy & Security
+## License
 
-- ✅ **100% Local**: All LLM inference via Ollama (localhost)
-- ✅ **No Cloud**: No API keys, no external data transmission
-- ✅ **Per-User Isolation**: Each user's history is completely separate
-- ✅ **File-Based Storage**: Portable, user-controllable data
-- ⚠️ **Warning**: RAG document content is held in memory (RAM)
-
-
----
-
-## 🙏 Useful Tools
-
-- **Ollama** - Local LLM runtime
-- **PyQt6** - Desktop GUI framework
-- **Sentence Transformers** - Text embeddings
-- **FAISS** - Vector similarity search
-- **ReportLab** - PDF generation
-- **Matplotlib** - Data visualization
-
----
-
-## 📧 Contact & Support
-
-For issues, feature requests, or contributions:
-- GitHub Issues: https://github.com/Jianningli/denal_ai_assistant/issues
-- Email: jianningli.me@gmail.com
-
----
-
-*Built with ❤️. Your data, your control.*
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
