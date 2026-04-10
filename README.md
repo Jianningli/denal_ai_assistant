@@ -12,6 +12,7 @@ This project is intended for educational and informational use only. It is not a
   - [Prerequisites](#prerequisites)
   - [Python dependencies](#python-dependencies)
 - [Run](#run)
+- [Release](#release)
 - [Code Structure](#code-structure)
 - [File Structure](#file-structure)
 - [Usage Notes](#usage-notes)
@@ -192,6 +193,28 @@ If you prefer to run the app from inside the package folder itself:
 cd dental_ai
 python app.py
 ```
+
+## Release
+
+A packaged Windows release is available in the `release/` folder.
+
+- `release/_internal.7z`: packaged release archive tracked through Git LFS.
+- `release/README.md`: release-specific usage notes.
+
+To use the packaged build:
+
+1. Extract `release/_internal.7z` with 7-Zip or another compatible archive tool.
+2. Open Command Prompt or PowerShell.
+3. Start Ollama by running:
+
+```bash
+ollama
+```
+
+4. Keep that terminal open.
+5. Double-click the app `.exe` inside the extracted folder.
+
+The packaged app still requires a local Ollama installation and the expected local models.
 
 ## Code Structure
 
