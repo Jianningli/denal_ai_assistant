@@ -12,6 +12,8 @@ This project is intended for educational and informational use only. It is not a
   - [Prerequisites](#prerequisites)
   - [Python dependencies](#python-dependencies)
 - [Run](#run)
+- [Code Structure](#code-structure)
+- [File Structure](#file-structure)
 - [Usage Notes](#usage-notes)
   - [First launch](#first-launch)
   - [History and exports](#history-and-exports)
@@ -179,8 +181,73 @@ cryptography
 ## Run
 
 ```bash
-python dental_ai_chatbot.py
+python -m dental_ai
 ```
+
+Run that command from the parent directory that contains the `dental_ai/` package folder.
+
+If you prefer to run the app from inside the package folder itself:
+
+```bash
+cd dental_ai
+python app.py
+```
+
+## Code Structure
+
+- `app.py`: application bootstrap for direct execution with `python app.py`.
+- `__main__.py`: module entry point for `python -m dental_ai`.
+- `auth/`: login, registration, password verification, and encryption key derivation.
+- `core/`: shared constants, history storage, context compression, PDF export, and utility helpers.
+- `ui/main_window.py`: top-level window, sidebar navigation, toolbar actions, and tool routing.
+- `ui/dialogs/`: login and global search dialogs.
+- `ui/panels/`: feature-specific panels for chat, PDF summary, website summary, Excel analysis, RAG, and image analysis.
+- `ui/widgets/`: reusable session and shared UI widgets.
+- `workers/`: background QThread workers for Ollama calls, web fetching, RAG indexing, and image analysis.
+- `system_prompt/`: Ollama modelfile definitions used by the dental assistant model.
+
+## File Structure
+
+```text
+dental_ai/
+├── app.py
+├── __main__.py
+├── __init__.py
+├── auth/
+│   ├── __init__.py
+│   └── auth_store.py
+├── core/
+│   ├── constants.py
+│   ├── context_manager.py
+│   ├── history_store.py
+│   ├── pdf_export.py
+│   └── utils.py
+├── ui/
+│   ├── main_window.py
+│   ├── dialogs/
+│   │   ├── login_dialog.py
+│   │   └── search_dialog.py
+│   ├── panels/
+│   │   ├── chat_panel.py
+│   │   ├── excel_panel.py
+│   │   ├── image_panel.py
+│   │   ├── pdf_panel.py
+│   │   ├── rag_panel.py
+│   │   └── web_panel.py
+│   └── widgets/
+│       ├── base_session.py
+│       └── shared.py
+├── workers/
+│   ├── __init__.py
+│   └── threads.py
+├── system_prompt/
+├── assests/
+├── history/
+├── requirements.txt
+└── README.md
+```
+
+`history/` is runtime data created by the application. `assests/` contains screenshots and sample files used in the README and for local testing.
 
 ## Usage Notes
 
